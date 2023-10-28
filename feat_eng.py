@@ -17,7 +17,7 @@ def make_features(df):
 
     algo_df = pd.concat(result_dfs)
     df = algo_df.dropna(axis = 0, subset=['hour'])
-    del algo_df;gc.collect()
+    del algo_df, result_dfs;gc.collect()
     
 
     periods = 10
@@ -64,13 +64,15 @@ def rolling_window_algo(df_group):
     df_group['day_id'] = (df_group['timestamp'] - pd.Timedelta(hours=12)).dt.date
     thresholds = df_group.groupby('day_id')['rolling_median'].quantile(0.1) * 15
     df_group['threshold'] = df_group['day_id'].map(thresholds)
-    df_group['below_threshold'] = (df_group['rolling_median'] < df_group['threshold']).astype(int)
-    df_group['block_diff'] = df_group['below_threshold'].diff()
-    df_group['block_start'] = (df_group['block_diff'] == 1).astype(int)
-    df_group['block_end'] = (df_group['block_diff'] == -1).astype(int)
-    if df_group['below_threshold'].iloc[0] == 1:
+    below_threshold_series = (df_group['rolling_median'] < df_group['threshold']).astype('int')
+    df_group['below_threshold'] = below_threshold_series
+    block_diff_series = below_threshold_series.diff()
+    df_group['block_diff'] = block_diff_series
+    df_group['block_start'] = (block_diff_series == 1).astype('int')
+    df_group['block_end'] = (block_diff_series == -1).astype('int')
+    if below_threshold_series.iloc[0] == 1:
         df_group.at[0, 'block_start'] = 1
-    if df_group['below_threshold'].iloc[-1] == 1:
+    if below_threshold_series.iloc[-1] == 1:
         df_group.at[-1, 'block_end'] = 1
     block_start_times = df_group.loc[df_group['block_start'] == 1, 'timestamp'].values
     block_end_times = df_group.loc[df_group['block_end'] == 1, 'timestamp'].values

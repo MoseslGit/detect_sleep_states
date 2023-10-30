@@ -2,13 +2,18 @@ import pandas as pd
 import numpy as np
 import gc
 
-
 def make_features(df):
     # parse the timestamp and create an "hour" feature
+
+    df['series_id'] = df['series_id'].astype('category')
     df['timestamp'] = pd.to_datetime(df['timestamp']).apply(lambda t: t.tz_localize(None))
     df["hour"] = df["timestamp"].dt.hour
-        
     
+    # Use .fillna(value = 0) or .interpolate(method='linear')?
+    df["anglezdiff"] = df["anglez"].diff().abs().astype(np.float32)
+
+    df.sort_values(['timestamp'], inplace=True)
+    df.set_index('timestamp', inplace=True)
     # Rolling window algo
     result_dfs = []
     for _, group in df.groupby('series_id'):
@@ -20,45 +25,41 @@ def make_features(df):
     del algo_df, result_dfs;gc.collect()
     
 
-    periods = 10
-    df["anglez_diff"] = df.groupby('series_id')['anglez'].diff(periods).abs().fillna(method="bfill").astype('float16')
-    df["anglez"] = abs(df["anglez"])
-    df["enmo_diff"] = df.groupby('series_id')['enmo'].diff(periods=periods).fillna(method="bfill").astype('float16')
-    df["anglez_rolling_mean"] = df["anglez"].rolling(periods,center=True).mean().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["enmo_rolling_mean"] = df["enmo"].rolling(periods,center=True).mean().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["anglez_rolling_max"] = df["anglez"].rolling(periods,center=True).max().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["enmo_rolling_max"] = df["enmo"].rolling(periods,center=True).max().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["anglez_rolling_std"] = df["anglez"].rolling(periods,center=True).std().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["enmo_rolling_std"] = df["enmo"].rolling(periods,center=True).std().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["anglez_diff_rolling_mean"] = df["anglez_diff"].rolling(periods,center=True).mean().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["enmo_diff_rolling_mean"] = df["enmo_diff"].rolling(periods,center=True).mean().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["anglez_diff_rolling_max"] = df["anglez_diff"].rolling(periods,center=True).max().fillna(method="bfill").fillna(method="ffill").astype('float16')
-    df["enmo_diff_rolling_max"] = df["enmo_diff"].rolling(periods,center=True).max().fillna(method="bfill").fillna(method="ffill").astype('float16')
+    diff_periods = [10, 20, 30]
+    for diff_period in diff_periods:
+        df[f"anglez_diff_{diff_period}"] = df.groupby('series_id')['anglez'].diff(diff_periods).astype(np.float16)
+        df[f"enmo_diff_{diff_period}"] = df.groupby('series_id')['enmo'].diff(diff_periods).astype(np.float16)
     
-    return df
+    for col in ['enmo', 'anglez', 'anglezdiff', 'enmo_diff_10', 'enmo_diff_20', 'enmo_diff_60', 'anglez_diff_10', 'anglez_diff_20', 'anglez_diff_60']:
+        
+        # periods in seconds        
+        periods = [60, 360, 720] 
+        
+        for n in periods:
+            
+            rol_args = {'window':f'{n+5}s', 'min_periods':10, 'center':True}
+            
+            for agg in ['median', 'mean', 'max', 'min', 'var']:
+                df[f'{col}_{agg}_{n}'] = df[col].rolling(**rol_args).agg(agg).astype(np.float16).values
+                gc.collect()
+            
+            if n == max(periods):
+                df[f'{col}_mad_{n}'] = (df[col] - df[f'{col}_median_{n}']).abs().rolling(**rol_args).median().astype(np.float16)
+            
+            df[f'{col}_amplit_{n}'] = df[f'{col}_max_{n}']-df[f'{col}_min_{n}']
+            df[f'{col}_amplit_{n}_min'] = df[f'{col}_amplit_{n}'].rolling(**rol_args).min().astype(np.float16).values
+            
+            df[f'{col}_diff_{n}_max'] = df[f'{col}_max_{n}'].diff().abs().rolling(**rol_args).max().astype(np.float16)
+            df[f'{col}_diff_{n}_mean'] = df[f'{col}_max_{n}'].diff().abs().rolling(**rol_args).mean().astype(np.float16)
 
-features = ["hour",
-            "anglez",
-            "anglez_rolling_mean",
-            "anglez_rolling_max",
-            "anglez_rolling_std",
-            "anglez_diff",
-            "anglez_diff_rolling_mean",
-            "anglez_diff_rolling_max",
-            "enmo",
-            "enmo_rolling_mean",
-            "enmo_rolling_max",
-            "enmo_rolling_std",
-            "enmo_diff",
-            "enmo_diff_rolling_mean",
-            "enmo_diff_rolling_max",
-            "rolling_algo_awake",
-           ]
+    df.reset_index(inplace=True)
+    df.dropna(inplace=True)
+
+    return df
 
 def rolling_window_algo(df_group):
     
     # Steps 3-5
-    df_group["anglez_diff"] = df_group['anglez'].diff().abs().fillna(method="bfill").astype('float16')
     df_group['rolling_median'] = df_group['anglez_diff'].rolling(window=60).median()
     # Steps 6-7
     df_group['day_id'] = (df_group['timestamp'] - pd.Timedelta(hours=12)).dt.date
@@ -96,5 +97,4 @@ def rolling_window_algo(df_group):
     df_group.loc[(df_group['day_id'] == longest_block_index[0]) & (cum_valid_block == longest_block_index[1]), 'main_sleep_period'] = 1
     df_group['rolling_algo_awake'] = (~(df_group['valid_block'] | df_group['main_sleep_period'])).astype(int).fillna(method="ffill")
     return df_group
-
 

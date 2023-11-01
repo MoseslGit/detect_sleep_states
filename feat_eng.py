@@ -3,11 +3,10 @@ import numpy as np
 import gc
 def make_features(df):
     # parse the timestamp and create an "hour" feature
-
     df['series_id'] = df['series_id'].astype('category')
     df['timestamp'] = pd.to_datetime(df['timestamp']).apply(lambda t: t.tz_localize(None))
     df["hour"] = df["timestamp"].dt.hour
-    
+    df['minute'] = df['timestamp'].dt.minute
     # Use .fillna(value = 0) or .interpolate(method='linear')?
     df["anglezdiff"] = df["anglez"].diff().abs().astype(np.float32)
 
@@ -40,6 +39,7 @@ def make_features(df):
 
     df = pd.concat([df] + new_columns, axis=1)
 
+    df.drop(columns=['timestamp'], inplace=True)
     df.dropna(inplace=True)
 
     return df

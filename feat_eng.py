@@ -15,17 +15,12 @@ def make_features(df):
     # Rolling window algo
 
     df = df.groupby('series_id').apply(rolling_window_algo).reset_index(drop=True)
-    
 
-    diff_periods = [10, 20, 30]
-    for diff_period in diff_periods:
-        df[f"anglez_diff_{diff_period}"] = df.groupby('series_id')['anglez'].diff(diff_period).astype(np.float32)
-        df[f"enmo_diff_{diff_period}"] = df.groupby('series_id')['enmo'].diff(diff_period).astype(np.float32)
     new_columns = []
         
     # periods in seconds        
     periods = [60, 360, 720] 
-    for col in ['enmo', 'anglez', 'anglezdiff', 'enmo_diff_10', 'enmo_diff_20', 'enmo_diff_30', 'anglez_diff_10', 'anglez_diff_20', 'anglez_diff_30']:
+    for col in ['enmo', 'anglez', 'anglezdiff']:
         
         for n in periods:
             
@@ -33,8 +28,9 @@ def make_features(df):
             rol_args = {'window': int(n/5), 'min_periods':10, 'center':True}
             
             for agg in ['median', 'mean', 'max', 'min', 'var']:
-
+                new_col_name = f'{col}_{agg}_{n}'
                 new_col = df[col].rolling(**rol_args).agg(agg).astype(np.float32)
+                new_col.name = new_col_name
                 new_columns.append(new_col)
 
     df = pd.concat([df] + new_columns, axis=1)
